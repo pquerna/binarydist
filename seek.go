@@ -1,4 +1,4 @@
-package binarydist
+package snapdiff
 
 import (
 	"errors"

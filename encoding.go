@@ -1,4 +1,4 @@
-package binarydist
+package snapdiff
 
 // SignMagLittleEndian is the numeric encoding used by the bsdiff tools.
 // It implements binary.ByteOrder using a sign-magnitude format

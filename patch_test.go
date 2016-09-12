@@ -1,62 +1,44 @@
-package binarydist
+package snapdiff
 
 import (
+	"bytes"
 	"io/ioutil"
 	"os"
-	"os/exec"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestPatch(t *testing.T) {
-	mustWriteRandFile("test.old", 1e3, 1)
-	mustWriteRandFile("test.new", 1e3, 2)
+	old := mustOpen("testdata/sample.old")
+	defer old.Close()
+	patch := mustOpen("testdata/sample.patch")
+	defer patch.Close()
 
-	got, err := ioutil.TempFile("/tmp", "bspatch.")
-	if err != nil {
-		panic(err)
-	}
-	os.Remove(got.Name())
+	tmp, err := ioutil.TempFile("", "snapdiff")
+	require.NoError(t, err)
+	defer tmp.Close()
+	defer os.Remove(tmp.Name())
 
-	err = exec.Command("bsdiff", "test.old", "test.new", "test.patch").Run()
-	if err != nil {
-		panic(err)
-	}
+	err = Patch(old, tmp, patch)
+	require.NoError(t, err)
+	tmp.Close()
 
-	err = Patch(mustOpen("test.old"), got, mustOpen("test.patch"))
-	if err != nil {
-		t.Fatal("err", err)
-	}
-
-	ref, err := got.Seek(0, 2)
-	if err != nil {
-		panic(err)
-	}
-
-	t.Logf("got %d bytes", ref)
-	if n := fileCmp(got, mustOpen("test.new")); n > -1 {
-		t.Fatalf("produced different output at pos %d", n)
-	}
+	expected, err := ioutil.ReadFile("testdata/sample.new")
+	patched, err := ioutil.ReadFile(tmp.Name())
+	require.NoError(t, err)
+	require.Equal(t, expected, patched)
 }
 
-func TestPatchHk(t *testing.T) {
-	got, err := ioutil.TempFile("/tmp", "bspatch.")
-	if err != nil {
-		panic(err)
-	}
-	os.Remove(got.Name())
+func TestPatchEmpty(t *testing.T) {
+	old := mustOpen("testdata/sample.old")
+	defer old.Close()
 
-	err = Patch(mustOpen("testdata/sample.old"), got, mustOpen("testdata/sample.patch"))
-	if err != nil {
-		t.Fatal("err", err)
-	}
+	tmp, err := ioutil.TempFile("", "snapdiff")
+	require.NoError(t, err)
+	defer tmp.Close()
+	defer os.Remove(tmp.Name())
 
-	ref, err := got.Seek(0, 2)
-	if err != nil {
-		panic(err)
-	}
-
-	t.Logf("got %d bytes", ref)
-	if n := fileCmp(got, mustOpen("testdata/sample.new")); n > -1 {
-		t.Fatalf("produced different output at pos %d", n)
-	}
+	err = Patch(old, tmp, bytes.NewReader([]byte{}))
+	require.Error(t, err)
 }

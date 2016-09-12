@@ -1,12 +1,13 @@
-package binarydist
+package snapdiff
 
 import (
 	"bytes"
-	"compress/bzip2"
 	"encoding/binary"
 	"errors"
 	"io"
 	"io/ioutil"
+
+	"github.com/golang/snappy"
 )
 
 var ErrCorrupt = errors.New("corrupt patch")
@@ -31,17 +32,17 @@ func Patch(old io.Reader, new io.Writer, patch io.Reader) error {
 	if err != nil {
 		return err
 	}
-	cpfbz2 := bzip2.NewReader(bytes.NewReader(ctrlbuf))
+	cpfsnap := snappy.NewReader(bytes.NewReader(ctrlbuf))
 
 	diffbuf := make([]byte, hdr.DiffLen)
 	_, err = io.ReadFull(patch, diffbuf)
 	if err != nil {
 		return err
 	}
-	dpfbz2 := bzip2.NewReader(bytes.NewReader(diffbuf))
+	dpfsnap := snappy.NewReader(bytes.NewReader(diffbuf))
 
 	// The entire rest of the file is the extra block.
-	epfbz2 := bzip2.NewReader(patch)
+	epfsnap := snappy.NewReader(patch)
 
 	obuf, err := ioutil.ReadAll(old)
 	if err != nil {
@@ -53,7 +54,7 @@ func Patch(old io.Reader, new io.Writer, patch io.Reader) error {
 	var oldpos, newpos int64
 	for newpos < hdr.NewSize {
 		var ctrl struct{ Add, Copy, Seek int64 }
-		err = binary.Read(cpfbz2, signMagLittleEndian{}, &ctrl)
+		err = binary.Read(cpfsnap, signMagLittleEndian{}, &ctrl)
 		if err != nil {
 			return err
 		}
@@ -64,7 +65,7 @@ func Patch(old io.Reader, new io.Writer, patch io.Reader) error {
 		}
 
 		// Read diff string
-		_, err = io.ReadFull(dpfbz2, nbuf[newpos:newpos+ctrl.Add])
+		_, err = io.ReadFull(dpfsnap, nbuf[newpos:newpos+ctrl.Add])
 		if err != nil {
 			return ErrCorrupt
 		}
@@ -86,7 +87,7 @@ func Patch(old io.Reader, new io.Writer, patch io.Reader) error {
 		}
 
 		// Read extra string
-		_, err = io.ReadFull(epfbz2, nbuf[newpos:newpos+ctrl.Copy])
+		_, err = io.ReadFull(epfsnap, nbuf[newpos:newpos+ctrl.Copy])
 		if err != nil {
 			return ErrCorrupt
 		}

@@ -1,10 +1,12 @@
-package binarydist
+package snapdiff
 
 import (
 	"bytes"
 	"encoding/binary"
 	"io"
 	"io/ioutil"
+
+	"github.com/golang/snappy"
 )
 
 func swap(a []int, i, j int) { a[i], a[j] = a[j], a[i] }
@@ -225,10 +227,8 @@ func diff(obuf, nbuf []byte, patch io.WriteSeeker) error {
 	}
 
 	// Compute the differences, writing ctrl as we go
-	pfbz2, err := newBzip2Writer(patch)
-	if err != nil {
-		return err
-	}
+	pfsnap := snappy.NewBufferedWriter(patch)
+
 	var scan, pos, length int
 	var lastscan, lastpos, lastoffset int
 	for scan < len(nbuf) {
@@ -313,23 +313,23 @@ func diff(obuf, nbuf []byte, patch io.WriteSeeker) error {
 			dblen += lenf
 			eblen += (scan - lenb) - (lastscan + lenf)
 
-			err = binary.Write(pfbz2, signMagLittleEndian{}, int64(lenf))
+			err = binary.Write(pfsnap, signMagLittleEndian{}, int64(lenf))
 			if err != nil {
-				pfbz2.Close()
+				pfsnap.Close()
 				return err
 			}
 
 			val := (scan - lenb) - (lastscan + lenf)
-			err = binary.Write(pfbz2, signMagLittleEndian{}, int64(val))
+			err = binary.Write(pfsnap, signMagLittleEndian{}, int64(val))
 			if err != nil {
-				pfbz2.Close()
+				pfsnap.Close()
 				return err
 			}
 
 			val = (pos - lenb) - (lastpos + lenf)
-			err = binary.Write(pfbz2, signMagLittleEndian{}, int64(val))
+			err = binary.Write(pfsnap, signMagLittleEndian{}, int64(val))
 			if err != nil {
-				pfbz2.Close()
+				pfsnap.Close()
 				return err
 			}
 
@@ -338,7 +338,7 @@ func diff(obuf, nbuf []byte, patch io.WriteSeeker) error {
 			lastoffset = pos - scan
 		}
 	}
-	err = pfbz2.Close()
+	err = pfsnap.Close()
 	if err != nil {
 		return err
 	}
@@ -351,20 +351,18 @@ func diff(obuf, nbuf []byte, patch io.WriteSeeker) error {
 	hdr.CtrlLen = int64(l64 - 32)
 
 	// Write compressed diff data
-	pfbz2, err = newBzip2Writer(patch)
+	pfsnap = snappy.NewBufferedWriter(patch)
+
+	n, err := pfsnap.Write(db[:dblen])
 	if err != nil {
-		return err
-	}
-	n, err := pfbz2.Write(db[:dblen])
-	if err != nil {
-		pfbz2.Close()
+		pfsnap.Close()
 		return err
 	}
 	if n != dblen {
-		pfbz2.Close()
+		pfsnap.Close()
 		return io.ErrShortWrite
 	}
-	err = pfbz2.Close()
+	err = pfsnap.Close()
 	if err != nil {
 		return err
 	}
@@ -377,20 +375,17 @@ func diff(obuf, nbuf []byte, patch io.WriteSeeker) error {
 	hdr.DiffLen = n64 - l64
 
 	// Write compressed extra data
-	pfbz2, err = newBzip2Writer(patch)
+	pfsnap = snappy.NewBufferedWriter(patch)
+	n, err = pfsnap.Write(eb[:eblen])
 	if err != nil {
-		return err
-	}
-	n, err = pfbz2.Write(eb[:eblen])
-	if err != nil {
-		pfbz2.Close()
+		pfsnap.Close()
 		return err
 	}
 	if n != eblen {
-		pfbz2.Close()
+		pfsnap.Close()
 		return io.ErrShortWrite
 	}
-	err = pfbz2.Close()
+	err = pfsnap.Close()
 	if err != nil {
 		return err
 	}
